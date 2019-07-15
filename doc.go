@@ -6,4 +6,4 @@ the action to only be valid when those conditions are met.
 
 Examples are in examples/
 */
-package game-rules
+package rules

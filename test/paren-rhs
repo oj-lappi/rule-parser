@@ -1,0 +1,4 @@
+# This doesn't work yet, the || is unexpected
+attack {
+	targetlevel < sourcelevel || (type == breaker)
+}

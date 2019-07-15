@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 	"io/ioutil"
-	"kugg/game-rules/language"
+	"kugg/rules/language"
 	"log"
 	"os"
 )
@@ -36,11 +36,18 @@ func main() {
 
 	text := string(b)
 
-	parseTree, err := language.Parse(text)
-	if err != nil {
-		fmt.Println("Errors:")
-		fmt.Println(err, "\n")
+	lexer := language.Lex(text)
+	for t := range lexer.Tokens {
+		fmt.Println(t)
 	}
-	fmt.Println("Parse tree:")
-	parseTree.PPrint()
+
+	/*
+		parseTree, err := language.Parse(text)
+		if err != nil {
+			fmt.Println("Errors:")
+			fmt.Println(err, "\n")
+		}
+		fmt.Println("Parse tree:")
+		parseTree.PPrint()
+	*/
 }

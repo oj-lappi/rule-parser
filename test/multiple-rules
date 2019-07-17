@@ -1,0 +1,12 @@
+#I also want to allow something like "no target piece"
+move {
+	targetpiece == nil
+	dist < sourcepiece_range
+}
+
+attack {
+	targetlevel <= sourcelevel
+	dist < sourcepiece_action_range
+}
+
+

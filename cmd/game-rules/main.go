@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io/ioutil"
+	"kugg/compilers/lex"
 	"kugg/rules/language"
 	"log"
 	"os"
@@ -39,15 +40,17 @@ func main() {
 	lexer := language.Lex(text)
 	for t := range lexer.Tokens {
 		fmt.Println(t)
+		if t.Type() == lex.TokenError {
+			fmt.Fprintf(os.Stderr, "error: %v\n", t)
+			os.Exit(1)
+		}
 	}
 
-	/*
-		parseTree, err := language.Parse(text)
-		if err != nil {
-			fmt.Println("Errors:")
-			fmt.Println(err, "\n")
-		}
-		fmt.Println("Parse tree:")
-		parseTree.PPrint()
-	*/
+	parseTree, err := language.Parse(text)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("Parse tree:")
+	parseTree.PPrint()
 }

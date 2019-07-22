@@ -16,8 +16,8 @@ const (
 	EQ                             //== (or =)
 	NE                             //!=
 	GT                             //>
-	LT                             // <
-	GE                             // >=
+	LT                             //<
+	GE                             //>=
 	LE                             //<=
 	AND                            //&&
 	OR                             //||

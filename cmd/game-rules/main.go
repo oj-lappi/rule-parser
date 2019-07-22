@@ -21,7 +21,6 @@ Usage:
 Prints out errors and the parse tree of the source
 `
 
-//TODO: should return 0 or 1
 func main() {
 	var fileName string
 	fileName = os.Args[1]
@@ -53,4 +52,7 @@ func main() {
 	}
 	fmt.Println("Parse tree:")
 	parseTree.PPrint()
+
+	fmt.Fprintf(os.Stderr, "error: %v\n", "TEST")
+	os.Exit(1)
 }

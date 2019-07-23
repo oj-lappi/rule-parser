@@ -1,6 +1,7 @@
 package language
 
 import (
+	"fmt"
 	"kugg/compilers/lex"
 	"kugg/compilers/parse"
 )
@@ -42,19 +43,33 @@ import (
 const (
 	ConditionList parse.NodeType = iota
 	Condition
-	LeftOperand
-	RightOperand
-	ident
-	operator
+	LHS
+	RHS
+	Ident
+	Operator
 )
 
 var names = map[parse.NodeType]string{
 	ConditionList: "condition-list",
 	Condition:     "condition",
-	ident:         "ident",
-	operator:      "op",
-	LeftOperand:   "lhs",
-	RightOperand:  "rhs",
+	Ident:         "ident",
+	Operator:      "op",
+	LHS:           "lhs",
+	RHS:           "rhs",
+}
+
+var arithmeticOperators = map[lex.TokenType]bool{
+	EQ: true,
+	NE: true,
+	GT: true,
+	LT: true,
+	GE: true,
+	LE: true,
+}
+
+var booleanOperators = map[lex.TokenType]bool{
+	AND: true,
+	OR:  true,
 }
 
 func init() {
@@ -67,108 +82,191 @@ func init() {
 
 func Parse(source string) (*parse.Tree, error) {
 	tree := parse.NewTree("rules", source, parseRoot)
-	err := tree.Parse(Lex(source))
+	l := Lex(source)
+	err := tree.Parse(l)
 	return tree, err
 }
 
 func parseRoot(tree *parse.Tree) {
-	tok := tree.Next()
-	if tok.Type() == ActionIdentifier && tree.Peek().Type() == leftBrace {
-		parseConditionList(tree, tok)
+	for {
+		tok := tree.Next()
+		switch tok.Type() {
+		case actionIdentifier:
+			if tree.Peek().Type() == leftBrace {
+				parseConditionList(tree, tok)
+			}
+			continue
+		case lex.TokenEOF:
+			return
+		}
+		tree.Unexpected(tok, "ident")
 	}
-	tree.Unexpected(tok, "ident")
 }
 
 //parseConditionList parses the rule for the action
 func parseConditionList(tree *parse.Tree, nameToken lex.Token) {
 	list := tree.AddNonTerminal(ConditionList, nameToken)
-	list.AddTerminal(ident, nameToken)
+	list.AddTerminal(Ident, nameToken)
 	tree.Curr = list
 	tree.Next() //This is a left brace, and has already been checked by parseRoot
+	tree.Next()
 	for {
-		tok := tree.Next()
-		switch tok.Type {
+		switch tok := tree.CurrentToken(); tok.Type() {
 		case rightBrace:
 			list.CommitSubTree()
 			tree.Curr = tree.Root
-			break
+			return
 		case name:
 			//lhs
+
 			parseCondition(tree, tok)
 			tree.Curr = list
 		case leftParen:
 			//lhs
 			parseCondition(tree, tok)
 			tree.Curr = list
-		//case comment:
-		//
+			//case comment:
+			//
+		case lex.TokenEOF:
 		default:
 			tree.ErrorAtTokenf(tok, "unexpected %v, expected a rule", tok)
 		}
 	}
-	parseRoot(tree)
 }
 
 func parseCondition(tree *parse.Tree, firstToken lex.Token) {
 	condition := tree.AddNonTerminal(Condition, firstToken)
-	tree.Curr = condition
-
-	lhs := tree.AddNonTerminal(LHS, firstToken)
-	tree.Curr = lhs
+	tree.Curr = condition.AddNonTerminal(LHS, firstToken)
 	parseExpression(tree, firstToken)
-	tree.Curr = condition
 
-	booleanOp := false
-
-	switch tok := tree.Next(); tok.Type() {
-	case EQ, NE, GT, LT, GE, LE:
-		parseArithmeticOperator(tree, tok)
-	case AND, OR:
-		booleanOp = true
-		parseBooleanOperator(tree, tok)
-	default:
+	tok := tree.Next()
+	if isOperator(tok) {
+		condition.AddTerminal(Operator, tok)
+	} else {
 		tree.ErrorAtTokenf(tok, "%v is not an operator", tok)
 	}
 
-	switch rhtok := tree.Next(); rhtok.Type() {
-	case name, leftParen:
-		rhs := tree.AddNonTerminal(RHS, rhtok)
-		tree.Curr = rhs
-		if booleanOp {
-			parseExpression(tree, rhtok)
+	tree.Curr = condition
+	parseRHS(tree, tok)
+}
+func parseRHS(tree *parse.Tree, operatorToken lex.Token) {
+
+	condition := tree.Curr
+	rhsToken := tree.Next()
+
+	if typ := rhsToken.Type(); typ == name || typ == leftParen {
+		tree.Curr = tree.AddNonTerminal(RHS, rhsToken)
+
+		if isBooleanOperator(operatorToken) {
+			parseExpression(tree, rhsToken)
 		} else {
-			parseIdent(tree, rhtok)
+			parseIdent(tree, rhsToken)
 		}
-	default:
-		tree.ErrorAtTokenf(tok, "%v is not an operator", tok)
+
+	} else {
+		tree.Unexpected(rhsToken, "( or name")
 	}
-	tree.Curr = condition
-	//lhs op rhs has been parsed
-	switch tok := tree.Next(); tok.Type() {
-	case name:
+
+	next := tree.Next()
+	switch typ := next.Type(); {
+	case typ == name:
 		if tree.NestLevel > 0 {
-			tree.ErrorAtTokenf(tok, "unclosed (")
+			tree.ErrorAtTokenf(next, "unclosed (")
+			//name -> name isn't valid if inside a parenthesis
 		}
-		tree.Back()
 		//Return to conditionlist
 		return
-	case rightParen:
+	case typ == rightParen:
 		if tree.NestLevel <= 0 {
-			tree.ErrorAtTokenf(tok, "unexpected )")
+			tree.ErrorAtTokenf(next, "unexpected )")
 		}
 		tree.NestLevel--
-	case rightBrace:
+		tree.Curr = condition
+	case typ == rightBrace:
 		if tree.NestLevel > 0 {
-			tree.ErrorAtTokenf(tok, "unclosed (")
+			tree.ErrorAtTokenf(next, "unclosed (")
 		}
-	case AND, OR:
+		tree.Curr = condition
+		return
+	case isArithmeticOperator(next) && isBooleanOperator(operatorToken):
+		//Special case, but is it equivalent to the case below?
+		//example:
+		//a > b && c < d
+		//           ^
+		//	     We are here
+		//the syntax tree should be
+		//
+		//&&
+		//  >
+		//    a
+		//    b
+		//  <
+		//    c
+		//    d
+		//
+		//Currently it is
+		//
+		//&&
+		//  >
+		//    a
+		//    b
+		//  c
+		//
+		//=> c's parent
+		//	panic(tree.Curr.Children()[1].Token())
+		//tree.Curr == the &&
+		//TODO:
+		//1. detach c from tree.Curr
+		//2. add a new condition, < to tree.Curr
+		//3. add a lhs to <
+		//4. add the c to the lhs
+		//5. add the operator
+		//6. recurse
+		//	panic(tree.Curr.Children()[0])
+		tree.Curr = tree.Curr.Children()[0]
+		rotateCondition(tree, next)
+		parseRHS(tree, next)
+
+		//The two cases differ only by condition and
+	case isBooleanOperator(next):
 		//TODO:special case, slurp left side into the lhs of this operation
 		//1. detach the already parsed operation from the tree
 		//2. add a new Condition
 		//2. add a new LHS
 		//3. add the operation to the LHS
 		//4. continue parsing the operator
+
+		//ALT:
+		//1. insert the Condition and LHS ABOVE the current condition and lhs
+
+		tree.Curr = condition
+		rotateCondition(tree, next)
+		/*
+			tree.Curr.RemoveChild(condition)
+			tree.Curr = tree.AddNonTerminal(Condition, condition.Token())
+			tree.AddNonTerminal(LHS, condition.Token()).AddChild(condition)
+			tree.AddTerminal(Operator, next)
+		*/
+		parseRHS(tree, next)
+	default:
+		tree.Unexpected(next, "} or condition")
 	}
+}
+
+func rotateCondition(tree *parse.Tree, newOperator lex.Token) {
+
+	//Remove the old node
+	old := tree.Curr
+	par := old.Parent()
+	fmt.Println(old)
+	fmt.Println(par)
+	par.RemoveChild(old)
+	tree.Curr = par
+
+	//Insert the new node
+	tree.Curr = tree.AddNonTerminal(Condition, newOperator)
+	tree.AddNonTerminal(LHS, old.Token()).AddChild(old)
+	tree.AddTerminal(Operator, newOperator)
 }
 
 func parseExpression(tree *parse.Tree, firstToken lex.Token) {
@@ -177,13 +275,15 @@ func parseExpression(tree *parse.Tree, firstToken lex.Token) {
 		a := tree.Next()
 		b := tree.Next()
 		if a.Type() == name && b.Type() == rightParen {
-			tree.AddTerminal(ident, a)
+			tree.AddTerminal(Ident, a)
 			return
 		}
 		tree.NestLevel++
-		parseCondition(tree.Back())
+		tree.Back()
+		parseCondition(tree, a)
 	case name:
-		tree.AddTerminal(ident, firstToken)
+		tree.AddTerminal(Ident, firstToken)
+
 	default:
 		tree.ErrorAtTokenf(firstToken, "unexpected %v, expected an expression", firstToken)
 	}
@@ -196,26 +296,25 @@ func parseIdent(tree *parse.Tree, firstToken lex.Token) {
 		a := tree.Next()
 		b := tree.Next()
 		if a.Type() == name && b.Type() == rightParen {
-			tree.AddTerminal(ident, a)
+			tree.AddTerminal(Ident, a)
 			return
 		}
 		tree.ErrorAtTokenf(firstToken, "unexpected %v, expected an identifier", firstToken)
 	case name:
-		tree.AddTerminal(ident, firstToken)
+		tree.AddTerminal(Ident, firstToken)
 	default:
 		tree.ErrorAtTokenf(firstToken, "unexpected %v, expected an identifier", firstToken)
 	}
 }
 
-func parseArithmeticOperator(tree *parse.Tree, opToken lex.Token) {
-	//TODO:check that the previous lhs is a an integer value
-	//or leave this to the next pass
-	tree.AddTerminal(operator, opToken)
+func isArithmeticOperator(t lex.Token) bool {
+	return arithmeticOperators[t.Type()]
 }
 
-func parseBooleanOperator(tree *parse.Tree, opToken lex.Token) {
-	//TODO:check that the previous lhs is a boolean expression (a condition)
-	//or leave this to the next pass
-	tree.AddTerminal(operator, opToken)
-	//with bool ops, the previous condition may be slurped into the lhs of this one
+func isBooleanOperator(t lex.Token) bool {
+	return booleanOperators[t.Type()]
+}
+func isOperator(t lex.Token) bool {
+	typ := t.Type()
+	return booleanOperators[typ] || arithmeticOperators[typ]
 }

@@ -5,6 +5,7 @@ import (
 	"io/ioutil"
 	"kugg/compilers/lex"
 	"kugg/rules/language"
+	"kugg/webgame/engine"
 	"log"
 	"os"
 )
@@ -37,8 +38,9 @@ func main() {
 	text := string(b)
 
 	lexer := language.Lex(text)
+	fmt.Println("\t\t-Token stream-")
 	for t := range lexer.Tokens {
-		fmt.Println(t)
+		//fmt.Println(t)
 		if t.Type() == lex.TokenError {
 			fmt.Fprintf(os.Stderr, "error: %v\n", t)
 			os.Exit(1)
@@ -46,13 +48,10 @@ func main() {
 	}
 
 	parseTree, err := language.Parse(text)
+	fmt.Println("\n\t\t-Parse tree-")
+	parseTree.PPrint()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Println("Parse tree:")
-	parseTree.PPrint()
-
-	fmt.Fprintf(os.Stderr, "error: %v\n", "TEST")
-	os.Exit(1)
 }
